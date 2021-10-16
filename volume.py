@@ -6,7 +6,6 @@ from typing import List
 
 
 def get_sink_ids() -> List[int]:
-    hostname = subprocess.check_output(["hostname"]).decode("utf-8").strip()
     out = subprocess.check_output(["pulsemixer", "--list-sinks"]).decode()
     lines = out.split("\n")
     sink_ids = []
@@ -63,7 +62,7 @@ def main():
         volume_down()
         notify()
     else:
-        print("Usage: python getvolume.py <up|down>")
+        print("Usage: volume <up|down>")
         sys.exit(1)
 
 
