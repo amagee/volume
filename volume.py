@@ -10,7 +10,7 @@ def get_sink_ids() -> List[int]:
     lines = out.split("\n")
     sink_ids = []
     for line in lines:
-        if line.startswith("Sink:") and "Default" in line:
+        if line.startswith("Sink:"): #  and "Default" in line:
             sink_ids.append(int(re.search(r"ID: sink-(\d+)", line).groups()[0]))
     return sink_ids
 
