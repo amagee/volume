@@ -1,19 +1,26 @@
 import { execa, execaCommand } from "execa";
-import dbus from 'dbus-next';
+import dbus from "dbus-next";
+import fs from "fs/promises";
 
-const getSinkIds = async ({defaultOnly = false} = {}) => {
-  const out = (await execaCommand('pulsemixer --list-sinks')).stdout;
-  const lines = out.split('\n');
+const NOTIFICATION_ID_PATH = new URL(
+  "notification_id.txt",
+  import.meta.url,
+);
+
+const getSinkIds = async ({ defaultOnly = false } = {}) => {
+  const out = (await execaCommand("pulsemixer --list-sinks")).stdout;
+  const lines = out.split("\n");
   const sinkIds = [];
   for (const line of lines) {
-    if (line.startsWith('Sink:') && (!defaultOnly || line.includes('Default'))) {
+    if (
+      line.startsWith("Sink:") &&
+      (!defaultOnly || line.includes("Default"))
+    ) {
       sinkIds.push(parseInt(line.match(/ID: sink-(\d+)/)[1]));
     }
   }
   return sinkIds;
 };
-
-
 
 function setCardProfile(card, profile) {
   return execa`pactl set-card-profile ${card} ${profile}`;
@@ -29,18 +36,20 @@ function moveSinkInput(stream, sink) {
 }
 
 async function getSourceOutputs() {
-  const {stdout} = await execa`pactl list source-outputs`;
-  const outputIds = stdout.split("\n")
-    .filter(line => line.startsWith("Source Output"))
-    .map(line => line.substring("Source Output #").length);
+  const { stdout } = await execa`pactl list source-outputs`;
+  const outputIds = stdout
+    .split("\n")
+    .filter((line) => line.startsWith("Source Output"))
+    .map((line) => line.substring("Source Output #").length);
   return Array.from(new Set(outputIds));
 }
 
 async function getSinkInputs() {
-  const {stdout} = await execa`pactl list sink-inputs`;
-  const inputIds = stdout.split("\n")
-    .filter(line => line.startsWith("Sink Input"))
-    .map(line => line.substring("Sink Input #").length);
+  const { stdout } = await execa`pactl list sink-inputs`;
+  const inputIds = stdout
+    .split("\n")
+    .filter((line) => line.startsWith("Sink Input"))
+    .map((line) => line.substring("Sink Input #").length);
   return Array.from(new Set(inputIds));
 }
 
@@ -50,7 +59,10 @@ async function setupJabra() {
 
   for (const output of getSourceOutputs()) {
     // Expect a bunch of "Moved failed." lines here if you have pavucontrol open.
-    await moveSourceOutput(output, "bluez_source.50_C2_75_12_3C_4B.headset-head-unit");
+    await moveSourceOutput(
+      output,
+      "bluez_source.50_C2_75_12_3C_4B.headset-head-unit",
+    );
   }
 }
 
@@ -70,19 +82,22 @@ async function setEdirolAsSink() {
     // Expect a bunch of "Moved failed." lines here if you have pavucontrol open.
     // await moveSinkInput(output, "alsa_output.usb-Roland_EDIROL_UA-25-00.analog-stereo");
     console.log(input);
-    await moveSinkInput(input, "alsa_output.usb-Roland_EDIROL_UA-25-00.pro-output-0");
+    await moveSinkInput(
+      input,
+      "alsa_output.usb-Roland_EDIROL_UA-25-00.pro-output-0",
+    );
   }
 }
 
 const volumeUp = async () => {
   for (const id of await getSinkIds()) {
-    await execaCommand(`pulsemixer --id ${id} --change-volume +10`);
+    await execaCommand(`pulsemixer --id ${id} --change-volume +5`);
   }
 };
 
 const volumeDown = async () => {
   for (const id of await getSinkIds()) {
-    await execaCommand(`pulsemixer --id ${id} --change-volume -10`);
+    await execaCommand(`pulsemixer --id ${id} --change-volume -5`);
   }
 };
 
@@ -91,18 +106,16 @@ async function withNotifier(cb) {
   try {
     sessionBus = dbus.sessionBus();
     const obj = await sessionBus.getProxyObject(
-      'org.freedesktop.Notifications',
-      '/org/freedesktop/Notifications'
+      "org.freedesktop.Notifications",
+      "/org/freedesktop/Notifications",
     );
-    const iface = obj.getInterface('org.freedesktop.Notifications');
+    const iface = obj.getInterface("org.freedesktop.Notifications");
 
     await cb(iface);
-  }
-  finally {
+  } finally {
     try {
       sessionBus.disconnect();
-    }
-    catch (e) { }
+    } catch (e) {}
   }
 }
 
@@ -116,8 +129,8 @@ function ifaceNotify(
     body,
     actions,
     hints,
-    expireTimeout
-  }
+    expireTimeout,
+  },
 ) {
   return iface.Notify(
     appName,
@@ -127,19 +140,29 @@ function ifaceNotify(
     body,
     actions,
     hints,
-    expireTimeout
+    expireTimeout,
   );
 }
 
 async function notifyCurrentVolume() {
-  const out = (await execaCommand(`pulsemixer --id ${(await getSinkIds())[0]} --get-volume`)).stdout;
-  const volumePct = parseInt(out.split(' ')[0]);
-  const volumeFormatted = `${volumePct}% ${'||'.repeat(volumePct / 10)}`;
+  const out = (
+    await execaCommand(
+      `pulsemixer --id ${(await getSinkIds())[0]} --get-volume`,
+    )
+  ).stdout;
+  const volumePct = parseInt(out.split(" ")[0]);
+  const volumeFormatted = `${volumePct}% ${"||".repeat(volumePct / 10)}`;
 
-  await withNotifier((iface) => {
-    return ifaceNotify(iface, {
+  let replacesId = 0;
+  try {
+    replacesId = parseInt(await fs.readFile(NOTIFICATION_ID_PATH, "utf8"));
+    if (Number.isNaN(replacesId)) replacesId = 0;
+  } catch (e) {}
+
+  await withNotifier(async (iface) => {
+    const id = await ifaceNotify(iface, {
       appName: "volume",
-      replacesId: 0,
+      replacesId,
       appIcon: "",
       summary: "Volume",
       body: volumeFormatted,
@@ -147,36 +170,30 @@ async function notifyCurrentVolume() {
       hints: {}, // In other libs this is []
       expireTimeout: 1000,
     });
+    await fs.writeFile(NOTIFICATION_ID_PATH, String(id));
   });
 }
 
 const main = async () => {
   const cmd = process.argv.at(-1);
-  if (cmd === 'up') {
+  if (cmd === "up") {
     await volumeUp();
     await notifyCurrentVolume();
-  }
-  else if (cmd === 'down') {
+  } else if (cmd === "down") {
     await volumeDown();
     await notifyCurrentVolume();
-  }
-  else if (cmd === 'get-outputs') {
+  } else if (cmd === "get-outputs") {
     console.log(await getSourceOutputs());
-  }
-  else if (cmd === 'get-inputs') {
+  } else if (cmd === "get-inputs") {
     console.log(await getSinkInputs());
-  }
-  else if (cmd === 'connect-sony-headphones') {
+  } else if (cmd === "connect-sony-headphones") {
     await connectSonyHeadphones();
-  }
-  else if (cmd === 'set-headphones-as-sink') {
+  } else if (cmd === "set-headphones-as-sink") {
     await setHeadphonesAsSink();
-  }
-  else if (cmd === 'set-edirol-as-sink') {
+  } else if (cmd === "set-edirol-as-sink") {
     await setEdirolAsSink();
-  }
-  else {
-    console.log('Usage: volume <up|down>');
+  } else {
+    console.log("Usage: volume <up|down>");
     process.exit(1);
   }
 };
