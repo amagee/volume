@@ -89,6 +89,15 @@ async function setEdirolAsSink() {
   }
 }
 
+function toggleMute() {
+  return execa`pactl set-sink-mute @DEFAULT_SINK@ toggle`;
+}
+
+async function isMuted() {
+  const { stdout } = await execa`pactl get-sink-mute @DEFAULT_SINK@`;
+  return stdout.includes("yes");
+}
+
 const volumeUp = async () => {
   for (const id of await getSinkIds()) {
     await execaCommand(`pulsemixer --id ${id} --change-volume +5`);
@@ -144,15 +153,16 @@ function ifaceNotify(
   );
 }
 
-async function notifyCurrentVolume() {
+async function getCurrentVolumePct() {
   const out = (
     await execaCommand(
       `pulsemixer --id ${(await getSinkIds())[0]} --get-volume`,
     )
   ).stdout;
-  const volumePct = parseInt(out.split(" ")[0]);
-  const volumeFormatted = `${volumePct}% ${"||".repeat(volumePct / 10)}`;
+  return parseInt(out.split(" ")[0]);
+}
 
+async function notify(body) {
   let replacesId = 0;
   try {
     replacesId = parseInt(await fs.readFile(NOTIFICATION_ID_PATH, "utf8"));
@@ -165,13 +175,28 @@ async function notifyCurrentVolume() {
       replacesId,
       appIcon: "",
       summary: "Volume",
-      body: volumeFormatted,
+      body,
       actions: [],
       hints: {}, // In other libs this is []
       expireTimeout: 1000,
     });
     await fs.writeFile(NOTIFICATION_ID_PATH, String(id));
   });
+}
+
+async function notifyCurrentVolume() {
+  const volumePct = await getCurrentVolumePct();
+  const volumeFormatted = `${volumePct}% ${"||".repeat(volumePct / 10)}`;
+  await notify(volumeFormatted);
+}
+
+async function notifyMuteStatus() {
+  if (await isMuted()) {
+    await notify("Muted");
+  } else {
+    const volumePct = await getCurrentVolumePct();
+    await notify(`Unmuted, volume ${volumePct}%`);
+  }
 }
 
 const main = async () => {
@@ -182,6 +207,9 @@ const main = async () => {
   } else if (cmd === "down") {
     await volumeDown();
     await notifyCurrentVolume();
+  } else if (cmd === "toggle-mute") {
+    await toggleMute();
+    await notifyMuteStatus();
   } else if (cmd === "get-outputs") {
     console.log(await getSourceOutputs());
   } else if (cmd === "get-inputs") {
@@ -193,7 +221,7 @@ const main = async () => {
   } else if (cmd === "set-edirol-as-sink") {
     await setEdirolAsSink();
   } else {
-    console.log("Usage: volume <up|down>");
+    console.log("Usage: volume <up|down|toggle-mute>");
     process.exit(1);
   }
 };
