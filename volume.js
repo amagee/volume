@@ -2,10 +2,7 @@ import { execa, execaCommand } from "execa";
 import dbus from "dbus-next";
 import fs from "fs/promises";
 
-const NOTIFICATION_ID_PATH = new URL(
-  "notification_id.txt",
-  import.meta.url,
-);
+const NOTIFICATION_ID_PATH = new URL("notification_id.txt", import.meta.url);
 
 const getSinkIds = async ({ defaultOnly = false } = {}) => {
   const out = (await execaCommand("pulsemixer --list-sinks")).stdout;
@@ -186,7 +183,7 @@ async function notify(body) {
 
 async function notifyCurrentVolume() {
   const volumePct = await getCurrentVolumePct();
-  const volumeFormatted = `${volumePct}% ${"||".repeat(volumePct / 10)}`;
+  const volumeFormatted = `${volumePct}% ${"█".repeat(volumePct / 10)}`;
   await notify(volumeFormatted);
 }
 
